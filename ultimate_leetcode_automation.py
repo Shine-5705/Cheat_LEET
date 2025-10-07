@@ -130,7 +130,21 @@ def get_solution_from_openai(question_data, language):
             print("❌ OpenAI API key not found")
             return None
         
-        client = OpenAI(api_key=api_key)
+        # Initialize OpenAI client with proper parameters (no proxies)
+        try:
+            client = OpenAI(
+                api_key=api_key,
+                timeout=30.0,  # Add timeout
+                max_retries=2   # Add retry logic
+            )
+        except Exception as init_error:
+            print(f"❌ OpenAI client initialization error: {str(init_error)}")
+            # Try fallback initialization without extra parameters
+            try:
+                client = OpenAI(api_key=api_key)
+            except Exception as fallback_error:
+                print(f"❌ OpenAI fallback initialization failed: {str(fallback_error)}")
+                return None
         
         prompt = f"""
 You are solving a LeetCode problem. Provide ONLY the complete working code that exactly matches the template structure.
@@ -161,15 +175,103 @@ Provide the complete, working code that I can directly paste into LeetCode:
         """
         
         print("🤖 Sending to OpenAI...")
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": f"You are a precise code completion assistant. You must maintain the exact format and structure of LeetCode templates while providing working {language} solutions. Never add explanations or change the template structure."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.1
-        )
+        
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": f"You are a precise code completion assistant. You must maintain the exact format and structure of LeetCode templates while providing working {language} solutions. Never add explanations or change the template structure."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.1
+            )
+        except Exception as api_error:
+            print(f"❌ OpenAI API call error: {str(api_error)}")
+            # Try with different model as fallback
+            try:
+                print("🔄 Trying with gpt-4o-mini as fallback...")
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": f"You are a precise code completion assistant. You must maintain the exact format and structure of LeetCode templates while providing working {language} solutions. Never add explanations or change the template structure."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=1000,
+                    temperature=0.1
+                )
+            except Exception as fallback_api_error:
+                print(f"❌ Fallback API call also failed: {str(fallback_api_error)}")
+                return None
+        
+        solution = response.choices[0].message.content.strip()
+        
+        # Clean up the solution - remove markdown if present
+        if "```" in solution:
+            code_blocks = re.findall(r'```(?:\w+)?\n?(.*?)```', solution, re.DOTALL)
+            if code_blocks:
+                solution = code_blocks[0].strip()
+        
+        # Ensure proper formatting is maintained
+        lines = solution.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            cleaned_lines.append(line.rstrip())
+        
+        # Remove empty lines at start and end
+        while cleaned_lines and not cleaned_lines[0].strip():
+            cleaned_lines.pop(0)
+        while cleaned_lines and not cleaned_lines[-1].strip():
+            cleaned_lines.pop()
+        
+        return '\n'.join(cleaned_lines)
+        
+    except Exception as e:
+        print(f"❌ OpenAI error: {str(e)}")
+        return None
+
+def get_solution_with_custom_prompt(custom_prompt):
+    """
+    Get solution from OpenAI using a custom prompt.
+    """
+    try:
+        print("🧠 STEP: Getting solution from OpenAI with custom prompt...")
+        
+        api_key = os.getenv('OPENAI_API_KEY')
+        if not api_key or api_key == 'your_openai_api_key_here':
+            print("❌ OpenAI API key not found! Please set OPENAI_API_KEY environment variable.")
+            return None
+        
+        client = OpenAI(api_key=api_key)
+        
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {
+                        "role": "system", 
+                        "content": "You are a coding expert. Provide clean, working code solutions without any explanations or markdown formatting. Only return the code."
+                    },
+                    {"role": "user", "content": custom_prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.1
+            )
+        except Exception as api_error:
+            print(f"❌ Primary API call failed: {str(api_error)}")
+            # Fallback attempt
+            try:
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[
+                        {"role": "user", "content": custom_prompt}
+                    ],
+                    max_tokens=1000,
+                    temperature=0.1
+                )
+            except Exception as fallback_api_error:
+                print(f"❌ Fallback API call also failed: {str(fallback_api_error)}")
+                return None
         
         solution = response.choices[0].message.content.strip()
         
@@ -379,21 +481,80 @@ def check_test_results(page):
         # Wait for results to load
         time.sleep(5)
         
-        # Check for accepted first
+        # Check for accepted first - VERY SPECIFIC selectors only
+        # First, ensure we're looking in the test results area
+        test_result_area = None
+        test_result_selectors = [
+            '[data-track-load="console_result"]',
+            '.console-wrap',
+            '#submission-result',
+            '[class*="console"]',
+            '[class*="result"]'
+        ]
+        
+        for selector in test_result_selectors:
+            try:
+                test_result_area = page.query_selector(selector)
+                if test_result_area:
+                    print(f"🔍 Found test result area with selector: {selector}")
+                    break
+            except:
+                continue
+        
+        # Only look for "Accepted" in the specific console result element
         accepted_selectors = [
-            'div[data-e2e-locator="console-result"]:has-text("Accepted")',
-            '.text-green-s:has-text("Accepted")',
-            'div:has-text("Accepted")'
+            'div[data-e2e-locator="console-result"]',  # Most specific - your exact format
+            '.text-xl.font-medium.text-green-s[data-e2e-locator="console-result"]',  # Even more specific
+            '.text-green-s[data-e2e-locator="console-result"]'  # Specific with green text and console-result
         ]
         
         for selector in accepted_selectors:
             try:
                 accepted_element = page.query_selector(selector)
-                if accepted_element and "accepted" in accepted_element.inner_text().lower():
-                    print("✅ Code Accepted!")
-                    return ('accepted', None)
+                if accepted_element:
+                    element_text = accepted_element.inner_text().strip()
+                    print(f"🔍 Found element with selector '{selector}': '{element_text}'")
+                    # STRICT check: must be exactly "Accepted" and nothing else
+                    if element_text.lower() == "accepted":
+                        print("✅ Code Accepted!")
+                        print(f"✅ Detected using selector: {selector}")
+                        return ('accepted', None)
+                    else:
+                        print(f"❌ Element text '{element_text}' is not exactly 'Accepted'")
             except:
                 continue
+        
+        print("❌ No exact 'Accepted' status found in console result area")
+        
+        # Check for common error states first
+        error_states = [
+            "Wrong Answer",
+            "Runtime Error", 
+            "Time Limit Exceeded",
+            "Memory Limit Exceeded",
+            "Compilation Error",
+            "Compile Error",  # Added this variant
+            "Output Limit Exceeded"
+        ]
+        
+        # Check if we have any error states
+        try:
+            console_result = page.query_selector('[data-e2e-locator="console-result"]')
+            if console_result:
+                result_text = console_result.inner_text().strip()
+                print(f"🔍 Console result shows: '{result_text}'")
+                
+                for error_state in error_states:
+                    if error_state.lower() in result_text.lower():
+                        print(f"❌ Found error state: {error_state}")
+                        return ('error', result_text)
+                
+                # If it's not "Accepted" and not a known error, it's unknown
+                if result_text and result_text.lower() != "accepted":
+                    print(f"⚠️ Unknown result state: {result_text}")
+                    return ('unknown', result_text)
+        except:
+            pass
         
         # Get detailed error information
         error_details = {}
@@ -550,68 +711,224 @@ def extract_solution_from_solutions_tab(page, preferred_language):
         print("📚 Looking for official solution...")
         time.sleep(3)  # Wait for solutions to load
         
-        # Look for the first solution (usually LeetCode's official solution)
+        # Look for the second solution (non-editorial)
         solution_selectors = [
-            'div.group.flex.w-full.cursor-pointer.flex-col.gap-1\\.5.px-4.pt-3',
-            'div[class*="group"][class*="cursor-pointer"]:first-child',
-            'div:has-text("LeetCode"):first',
-            'div:has-text("Editorial")',
-            '.group.flex.w-full.cursor-pointer'
+            'div.group.flex.w-full.cursor-pointer.flex-col.gap-1\\.5.px-4.pt-3:nth-child(2)',
+            'div[class*="group"][class*="cursor-pointer"]:nth-child(2)',
+            '.group.flex.w-full.cursor-pointer:nth-child(2)'
         ]
         
         for selector in solution_selectors:
             try:
-                first_solution = page.wait_for_selector(selector, timeout=5000)
-                if first_solution:
-                    print(f"✅ Found solution with selector: {selector}")
-                    first_solution.click()
-                    print("✅ Clicked on first solution!")
+                second_solution = page.wait_for_selector(selector, timeout=5000)
+                if second_solution:
+                    print(f"✅ Found second solution with selector: {selector}")
+                    second_solution.click()
+                    print("✅ Clicked on second solution!")
                     time.sleep(5)  # Wait for solution to load
                     break
             except:
                 continue
         else:
-            print("❌ Could not find any solution to click")
+            print("❌ Could not find second solution to click")
             return None
         
         # Wait for the solution content to load
         time.sleep(3)
         
-        # Try to extract code from the solution page
-        code_selectors = [
-            'pre code',
-            '.monaco-editor .view-lines',
-            'code',
-            'pre',
-            '[class*="highlight"]',
-            '[class*="code-block"]'
-        ]
-        
-        solution_code = None
-        for selector in code_selectors:
-            try:
-                code_elements = page.query_selector_all(selector)
-                for element in code_elements:
-                    text = element.inner_text()
-                    # Look for code that contains class/function definitions
-                    if ('class Solution' in text or 'def ' in text) and len(text) > 50:
-                        solution_code = text
-                        print(f"✅ Found solution code with selector: {selector}")
-                        break
-                if solution_code:
-                    break
-            except:
-                continue
-        
-        if solution_code:
-            print("✅ Successfully extracted solution from Solutions tab!")
-            print("\n📋 SOLUTION FROM SOLUTIONS TAB:")
-            print("="*60)
-            print(solution_code)
-            print("="*60)
-            return solution_code
-        else:
-            print("❌ Could not extract code from solution")
+        # Extract all content from elements with break-words class
+        try:
+            print("🔍 Extracting ALL content from break-words elements and iframes...")
+            
+            # Enhanced extraction to handle break-words class and iframe content
+            solution_content = page.evaluate("""
+                () => {
+                    let extractedContent = {
+                        strategy: '',
+                        innerHTML: '',
+                        innerText: '',
+                        iframes: [],
+                        allContent: ''
+                    };
+                    
+                    // Strategy 1: Find ALL elements with break-words class (priority)
+                    const breakWordsElements = document.querySelectorAll('.break-words, [class*="break-words"]');
+                    
+                    if (breakWordsElements.length > 0) {
+                        console.log('Found break-words elements:', breakWordsElements.length);
+                        
+                        let combinedText = '';
+                        let combinedHTML = '';
+                        let iframesList = [];
+                        
+                        for (let element of breakWordsElements) {
+                            // Extract text content
+                            const textContent = element.innerText || element.textContent || '';
+                            if (textContent.trim()) {
+                                combinedText += textContent + '\\n\\n';
+                            }
+                            
+                            // Extract HTML content
+                            combinedHTML += element.innerHTML + '\\n\\n';
+                            
+                            // Look for iframes within this element
+                            const iframes = element.querySelectorAll('iframe');
+                            for (let iframe of iframes) {
+                                const iframeInfo = {
+                                    src: iframe.src,
+                                    width: iframe.width,
+                                    height: iframe.height,
+                                    allowfullscreen: iframe.allowFullscreen,
+                                    outerHTML: iframe.outerHTML
+                                };
+                                iframesList.push(iframeInfo);
+                                console.log('Found iframe:', iframe.src);
+                            }
+                        }
+                        
+                        extractedContent.strategy = 'break-words';
+                        extractedContent.innerHTML = combinedHTML.trim();
+                        extractedContent.innerText = combinedText.trim();
+                        extractedContent.iframes = iframesList;
+                        extractedContent.allContent = combinedText.trim();
+                        
+                        return extractedContent;
+                    }
+                    
+                    // Strategy 2: Look for iframes anywhere in the page if no break-words found
+                    const allIframes = document.querySelectorAll('iframe');
+                    if (allIframes.length > 0) {
+                        console.log('Found standalone iframes:', allIframes.length);
+                        
+                        let iframesList = [];
+                        let iframeContent = '';
+                        
+                        for (let iframe of allIframes) {
+                            const iframeInfo = {
+                                src: iframe.src,
+                                width: iframe.width,
+                                height: iframe.height,
+                                allowfullscreen: iframe.allowFullscreen,
+                                outerHTML: iframe.outerHTML
+                            };
+                            iframesList.push(iframeInfo);
+                            iframeContent += 'IFRAME: ' + iframe.src + '\\n';
+                        }
+                        
+                        extractedContent.strategy = 'standalone-iframes';
+                        extractedContent.iframes = iframesList;
+                        extractedContent.allContent = iframeContent;
+                        
+                        return extractedContent;
+                    }
+                    
+                    // Strategy 3: Look for solution content in common containers
+                    const contentSelectors = [
+                        '.solution-content',
+                        '.description-content', 
+                        '.content',
+                        '.post-content',
+                        '.solution-body',
+                        '[class*="content"]'
+                    ];
+                    
+                    for (let selector of contentSelectors) {
+                        const elements = document.querySelectorAll(selector);
+                        if (elements.length > 0) {
+                            console.log('Found content with selector:', selector);
+                            let content = '';
+                            let htmlContent = '';
+                            
+                            for (let element of elements) {
+                                content += (element.innerText || element.textContent || '') + '\\n\\n';
+                                htmlContent += element.innerHTML + '\\n\\n';
+                            }
+                            
+                            extractedContent.strategy = selector;
+                            extractedContent.innerHTML = htmlContent.trim();
+                            extractedContent.innerText = content.trim();
+                            extractedContent.allContent = content.trim();
+                            
+                            return extractedContent;
+                        }
+                    }
+                    
+                    // Strategy 4: Fallback to the second div element
+                    const divs = document.querySelectorAll('div');
+                    if (divs.length >= 2) {
+                        console.log('Using fallback: second div element');
+                        const secondDiv = divs[1];
+                        
+                        extractedContent.strategy = 'second-div-fallback';
+                        extractedContent.innerHTML = secondDiv.innerHTML;
+                        extractedContent.innerText = secondDiv.innerText || secondDiv.textContent || '';
+                        extractedContent.allContent = secondDiv.innerText || secondDiv.textContent || '';
+                        
+                        return extractedContent;
+                    }
+                    
+                    return null;
+                }
+            """)
+            
+            if solution_content and (solution_content['allContent'] or solution_content['iframes']):
+                content_text = solution_content['allContent'].strip()
+                strategy = solution_content.get('strategy', 'unknown')
+                iframes = solution_content.get('iframes', [])
+                
+                print(f"✅ Extracted content using strategy: {strategy}")
+                print(f"📊 Content length: {len(content_text)} characters")
+                print(f"🖼️ Found {len(iframes)} iframe(s)")
+                
+                # Display extracted content
+                print("\n📋 EXTRACTED SOLUTION CONTENT:")
+                print("="*60)
+                if content_text:
+                    print(content_text[:500] + "..." if len(content_text) > 500 else content_text)
+                
+                # Display iframe information
+                if iframes:
+                    print("\n🖼️ IFRAME CONTENT FOUND:")
+                    for i, iframe in enumerate(iframes, 1):
+                        print(f"  {i}. Source: {iframe['src']}")
+                        print(f"     Size: {iframe['width']}x{iframe['height']}")
+                print("="*60)
+                
+                # Create comprehensive prompt for OpenAI including iframe info
+                iframe_info = ""
+                if iframes:
+                    iframe_info = "\n\nIFRAME CONTENT DETECTED:\n"
+                    for iframe in iframes:
+                        iframe_info += f"- Interactive Code: {iframe['src']}\n"
+                    iframe_info += "\nNote: The solution may contain interactive code examples in iframes."
+                
+                # Send to OpenAI to get solution in preferred language
+                print("🧠 Getting solution from OpenAI...")
+                prompt = f"""
+Based on the following LeetCode solution content, please provide a clean, working solution in {preferred_language}. 
+Only return the code without any explanations or markdown formatting.
+
+Content from LeetCode solution page:
+{content_text}
+
+{iframe_info}
+
+Please provide the solution in {preferred_language} format.
+"""
+                
+                openai_solution = get_solution_with_custom_prompt(prompt)
+                if openai_solution:
+                    print("✅ Successfully got solution from OpenAI!")
+                    return openai_solution
+                else:
+                    print("❌ Failed to get solution from OpenAI")
+                    return None
+            else:
+                print("❌ Could not extract content from break-words elements, iframes, or other containers")
+                return None
+                
+        except Exception as content_error:
+            print(f"❌ Error extracting content: {str(content_error)}")
             return None
             
     except Exception as e:
@@ -633,6 +950,22 @@ def solve_with_retry_logic(current_page, question_data, preferred_language, solu
         if result_status == 'accepted':
             print("🎉 Solution accepted! Submitting...")
             
+            # Double-check that we really have "Accepted" status before submitting
+            print("🔍 Double-checking 'Accepted' status before submission...")
+            time.sleep(2)  # Give a moment for any UI updates
+            
+            # Perform final verification
+            final_check_status, _ = check_test_results(current_page)
+            
+            if final_check_status != 'accepted':
+                print("⚠️ Final check failed - 'Accepted' status not confirmed!")
+                print("❌ Skipping submission for safety!")
+                print("🔄 Proceeding to next attempt or manual intervention...")
+                current_attempt += 1
+                continue
+            
+            print("✅ Final check confirmed - Solution is truly accepted!")
+            
             # Submit the solution
             if auto_submit:
                 print("\n🚀 FINAL STEP: Submitting the solution...")
@@ -653,15 +986,21 @@ def solve_with_retry_logic(current_page, question_data, preferred_language, solu
                     print("✅ Code accepted by LeetCode!")
                     print("⚠️ Please click 'Submit' manually!")
                     print("="*60)
+            else:
+                print("✅ Solution accepted! Auto-submit disabled - manual submission required.")
             return True  # Success
         
         elif result_status == 'error':
             print(f"❌ Attempt {current_attempt} failed with error:")
             print(f"📋 Error Details:\n{error_message}")
             
+            print("\n🤔 ANALYZING ERROR TYPE...")
+            print("="*60)
+            
             # Check if it's a "Wrong Answer" - skip OpenAI retries and go straight to Solutions tab
-            if error_message and "Wrong Answer" in error_message:
-                print("\n🎯 WRONG ANSWER DETECTED!")
+            if error_message and "wrong answer" in error_message.lower():
+                print("🎯 WRONG ANSWER DETECTED!")
+                print("📋 Strategy: Go to Solutions tab for correct algorithm")
                 print("="*60)
                 print("❌ OpenAI solution gave wrong answer")
                 print("🚀 GOING DIRECTLY TO SOLUTIONS TAB...")
@@ -761,9 +1100,15 @@ def solve_with_retry_logic(current_page, question_data, preferred_language, solu
                     print("❌ Could not access Solutions tab")
                     return False
             
-            # For other errors (Compile Error, Runtime Error), try OpenAI fix
+            # For other errors (Runtime Error, Time Limit, Compilation Error, etc.), try OpenAI fix
             elif current_attempt < max_attempts:
-                print(f"\n🔧 Attempting to fix with OpenAI (Attempt {current_attempt})...")
+                print("🔧 OTHER ERROR DETECTED!")
+                print("📋 Strategy: Send code + error to OpenAI for fixing")
+                print("="*60)
+                print(f"❌ Error Type: {error_message}")
+                print("🤖 Sending code + error to OpenAI for fixing...")
+                print("="*60)
+                print(f"🔧 Attempting to fix with OpenAI (Attempt {current_attempt})...")
                 
                 # Try to fix the code
                 fixed_code = fix_code_with_openai(question_data, preferred_language, current_code, error_message)
@@ -945,7 +1290,21 @@ def fix_code_with_openai(question_data, language, current_code, error_message):
             print("❌ OpenAI API key not found")
             return None
         
-        client = OpenAI(api_key=api_key)
+        # Initialize OpenAI client with proper parameters (no proxies)
+        try:
+            client = OpenAI(
+                api_key=api_key,
+                timeout=30.0,  # Add timeout
+                max_retries=2   # Add retry logic
+            )
+        except Exception as init_error:
+            print(f"❌ OpenAI client initialization error: {str(init_error)}")
+            # Try fallback initialization without extra parameters
+            try:
+                client = OpenAI(api_key=api_key)
+            except Exception as fallback_error:
+                print(f"❌ OpenAI fallback initialization failed: {str(fallback_error)}")
+                return None
         
         prompt = f"""
 The following code has an error. Please fix it and provide the corrected version.
@@ -969,15 +1328,34 @@ IMPORTANT: Return only the corrected code, no explanations.
         """
         
         print("🔧 Sending error to OpenAI for correction...")
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": f"You are a code debugging assistant. Fix {language} code errors while maintaining the exact template structure. Return only the corrected code."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=1000,
-            temperature=0.1
-        )
+        
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": f"You are a code debugging assistant. Fix {language} code errors while maintaining the exact template structure. Return only the corrected code."},
+                    {"role": "user", "content": prompt}
+                ],
+                max_tokens=1000,
+                temperature=0.1
+            )
+        except Exception as api_error:
+            print(f"❌ OpenAI API call error: {str(api_error)}")
+            # Try with different model as fallback
+            try:
+                print("🔄 Trying with gpt-4o-mini as fallback...")
+                response = client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": f"You are a code debugging assistant. Fix {language} code errors while maintaining the exact template structure. Return only the corrected code."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=1000,
+                    temperature=0.1
+                )
+            except Exception as fallback_api_error:
+                print(f"❌ Fallback API call also failed: {str(fallback_api_error)}")
+                return None
         
         fixed_solution = response.choices[0].message.content.strip()
         
@@ -1152,6 +1530,93 @@ def main():
             
             if not solution_code:
                 print("❌ Failed to get OpenAI solution!")
+                print("🚀 GOING DIRECTLY TO SOLUTIONS TAB...")
+                print("="*60)
+                
+                # Try to get solution from Solutions tab immediately
+                solutions_success = click_solutions_tab(current_page)
+                if solutions_success:
+                    solution_from_tab = extract_solution_from_solutions_tab(current_page, preferred_language)
+                    
+                    if solution_from_tab:
+                        print("\n🎯 FOUND SOLUTION FROM SOLUTIONS TAB!")
+                        print("📝 Applying solution from Solutions tab...")
+                        
+                        # Go back to the problem tab first
+                        try:
+                            # Look for "Description" or problem tab
+                            problem_tab_selectors = [
+                                'div:has-text("Description")',
+                                'div[class*="tab"]:has-text("Description")',
+                                'button:has-text("Description")',
+                                '.flexlayout__tab_button:has-text("Description")'
+                            ]
+                            
+                            for selector in problem_tab_selectors:
+                                try:
+                                    problem_tab = current_page.wait_for_selector(selector, timeout=3000)
+                                    if problem_tab:
+                                        problem_tab.click()
+                                        print("✅ Switched back to Description tab!")
+                                        time.sleep(2)
+                                        break
+                                except:
+                                    continue
+                        except:
+                            print("⚠️ Could not switch back to Description tab, continuing...")
+                        
+                        # Write solution from Solutions tab
+                        write_success = write_code_to_editor(current_page, solution_from_tab)
+                        
+                        if write_success:
+                            print("✅ Solution from Solutions tab written successfully!")
+                            
+                            # Run the solution
+                            print("\n▶️ Running solution from Solutions tab...")
+                            run_success = click_run_button(current_page)
+                            
+                            if run_success:
+                                print("✅ Solution execution started!")
+                                time.sleep(5)  # Wait for execution
+                                
+                                # Check the results
+                                result_status, _ = check_test_results(current_page)
+                                
+                                if result_status == 'accepted':
+                                    print("🎉 Solutions tab solution accepted! Submitting...")
+                                    
+                                    submit_success = click_submit_button(current_page)
+                                    if submit_success:
+                                        print("\n🎯 COMPLETE SUCCESS WITH SOLUTIONS TAB!")
+                                        print("="*60)
+                                        print("✅ Used solution from Solutions tab!")
+                                        print("✅ Code tested and accepted!")
+                                        print("✅ Solution submitted automatically!")
+                                        print("🏆 Problem solved using official solution!")
+                                        print("="*60)
+                                    else:
+                                        print("\n🎯 SOLUTIONS TAB SUCCESS!")
+                                        print("="*60)
+                                        print("✅ Used solution from Solutions tab!")
+                                        print("✅ Code accepted by LeetCode!")
+                                        print("⚠️ Please click 'Submit' manually!")
+                                        print("="*60)
+                                    return
+                                else:
+                                    print("❌ Even Solutions tab solution failed")
+                            else:
+                                print("❌ Failed to run Solutions tab solution")
+                        else:
+                            print("❌ Failed to write Solutions tab solution")
+                    else:
+                        print("❌ Could not extract solution from Solutions tab")
+                else:
+                    print("❌ Could not access Solutions tab")
+                
+                print("\n⚠️ All automated attempts failed!")
+                print("="*60)
+                print("📋 Manual intervention required!")
+                print("="*60)
                 return
             
             print("✅ OpenAI solution received!")
