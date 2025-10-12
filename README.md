@@ -1,4 +1,226 @@
-# LeetCode Auto Login & Daily Question Clicker
+# 🚀 LeetCode Daily Question Automation
+
+An intelligent automation tool that solves LeetCode daily questions using AI, with advanced error handling and Cloudflare bypass capabilities.
+
+## ✨ Features
+
+- **🔐 Cloudflare Bypass**: Uses storage state authentication to avoid detection
+- **🤖 AI-Powered Solutions**: Integrates with OpenAI to generate optimal code solutions
+- **🧠 Smart Error Handling**: 
+  - Wrong Answer → Automatically uses Solutions tab approach
+  - Other Errors → Attempts OpenAI-based fixes
+- **🌐 Multi-Language Support**: Java, Python, C++, JavaScript, and more
+- **📱 Complete Automation**: From login to submission without manual intervention
+- **🔄 Robust Retry Logic**: Handles various edge cases and network issues
+
+## 🛠️ Setup & Installation
+
+### Prerequisites
+- Python 3.8+
+- OpenAI API Key
+- Active LeetCode account
+
+### 1. Clone Repository
+```bash
+git clone <repository-url>
+cd Cheat_LEET
+```
+
+### 2. Install Dependencies
+```bash
+pip install -r requirements.txt
+```
+
+### 3. Environment Configuration
+Copy the example environment file and configure it:
+```bash
+copy .env.example .env
+```
+
+Edit `.env` with your settings:
+```env
+OPENAI_API_KEY=your_openai_api_key_here
+PREFERRED_LANGUAGE=Java
+```
+
+### 4. Authentication Setup
+Run the setup to create your authentication state:
+```bash
+python storage_state_login.py
+```
+
+**Alternative Method** (if browser automation is blocked):
+```bash
+# Step 1: Open your regular browser and log into LeetCode
+python manual_login_helper.py
+
+# Step 2: Extract cookies and create auth file
+python create_auth_from_cookies.py
+```
+
+### 5. Verify Setup
+```bash
+python setup_check.py
+```
+
+## 🚀 Usage
+
+### Basic Usage
+Run the complete automation:
+```bash
+python ultimate_leetcode_automation.py
+```
+
+### Quick Execution
+Use the provided batch file:
+```bash
+RUN_ULTIMATE.bat
+```
+
+## 📁 Project Structure
+
+```
+Cheat_LEET/
+├── 📄 ultimate_leetcode_automation.py  # Main automation script
+├── 🔐 storage_state_login.py          # Authentication handler
+├── 🎯 daily_question_clicker.py       # Daily question navigation
+├── 🔧 language_selector_simple.py     # Language selection logic
+├── 🍪 create_auth_from_cookies.py     # Alternative login method
+├── 📋 manual_login_helper.py          # Manual authentication guide
+├── ✅ setup_check.py                  # Setup verification utility
+├── ⚙️ requirements.txt                # Python dependencies
+├── 🔧 .env.example                    # Environment template
+└── 📖 README.md                       # This file
+```
+
+## 🔄 How It Works
+
+### 1. **Authentication**
+- Uses Playwright's storage state to maintain persistent login
+- Bypasses Cloudflare protection with stealth configurations
+
+### 2. **Daily Question Navigation**
+- Automatically finds and clicks the daily question
+- Handles various LeetCode UI layouts and selectors
+
+### 3. **Language Selection**
+- Automatically selects your preferred programming language
+- Supports all major LeetCode languages
+
+### 4. **Content Extraction**
+- Extracts problem description and code template
+- Uses multiple fallback strategies for robust content retrieval
+
+### 5. **AI Solution Generation**
+- Sends problem context to OpenAI
+- Generates language-specific solutions
+
+### 6. **Smart Error Handling**
+```
+┌─ Run Code ─┐
+│            │
+├─ Accepted ─┼─► Submit ─► SUCCESS ✅
+│            │
+├─ Wrong Answer ─┼─► Solutions Tab ─► Third Solution ─► OpenAI ─► Retry
+│                │
+└─ Other Errors ─┼─► OpenAI Fix ─► Retry (up to 3 attempts)
+```
+
+### 7. **Submission & Verification**
+- Automatically submits when code is accepted
+- Verifies submission result and handles edge cases
+
+## 🔧 Configuration Options
+
+### Environment Variables
+- `OPENAI_API_KEY`: Your OpenAI API key
+- `PREFERRED_LANGUAGE`: Programming language (Java, Python, C++, etc.)
+
+### Advanced Options
+Modify these in `ultimate_leetcode_automation.py`:
+- `auto_submit`: Enable/disable automatic submission
+- `max_retries`: Maximum retry attempts for fixes
+- `timeout_settings`: Adjust wait times for various operations
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**1. Authentication Failed**
+```bash
+# Re-run the setup
+python storage_state_login.py
+```
+
+**2. OpenAI API Errors**
+- Verify your API key in `.env`
+- Check API quota and billing
+- Ensure OpenAI library is updated: `pip install openai --upgrade`
+
+**3. Browser Detection Issues**
+- Use the manual login method
+- Clear browser data and try again
+
+**4. Timeout Errors**
+- Check internet connection
+- Increase timeout values in the script
+
+### Debug Mode
+Enable verbose logging by modifying the script:
+```python
+DEBUG_MODE = True  # Add this at the top of ultimate_leetcode_automation.py
+```
+
+## 📊 Success Metrics
+
+The automation provides detailed feedback:
+- ✅ **Complete Success**: Problem solved and submitted
+- ⚠️ **Partial Success**: Code accepted but manual submission required
+- ❌ **Failed**: Issue encountered (with detailed error analysis)
+
+## 🛡️ Security & Ethics
+
+### Responsible Usage
+- **Educational Purpose**: Use for learning and understanding algorithms
+- **Rate Limiting**: Built-in delays to respect LeetCode's servers
+- **No Cheating**: Generates original solutions, doesn't copy existing answers
+
+### Privacy
+- Authentication stored locally in `auth_state.json`
+- No personal data transmitted to external services except OpenAI API
+
+## 🔄 Updates & Maintenance
+
+### Regular Updates
+- LeetCode UI changes may require selector updates
+- OpenAI API changes may need integration fixes
+
+### Contributing
+1. Fork the repository
+2. Create a feature branch
+3. Test thoroughly
+4. Submit a pull request
+
+## 📝 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## ⚠️ Disclaimer
+
+This tool is for educational purposes. Always review generated solutions and understand the algorithms before submission. Use responsibly and in accordance with LeetCode's terms of service.
+
+## 🆘 Support
+
+If you encounter issues:
+1. Check the troubleshooting section
+2. Run `python setup_check.py` for diagnostics
+3. Create an issue with detailed error logs
+
+---
+
+**Made with ❤️ for the coding community**
+
+*Happy Coding! 🎯*
 
 This project provides automated tools to login to LeetCode and click on the daily question button.
 

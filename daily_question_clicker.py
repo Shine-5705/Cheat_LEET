@@ -21,14 +21,26 @@ def click_daily_question(page, switch_to_new_tab=True):
     
     # Multiple selectors to try for the daily question button
     daily_question_selectors = [
+        # Modern LeetCode selectors (2024/2025)
+        'a[href*="/problems/"][data-testid*="daily"]',
         'a[href*="envType=daily-question"]',  # Direct approach - links containing daily-question
         'a[href*="/problems/"][href*="envType=daily-question"]',  # More specific
+        '[data-cy="daily-question-link"]',  # Cypress test selector
+        '[data-testid="daily-question"]',   # Test ID selector
+        # Look for "Today" or "Daily" text
+        'a:has-text("Today")',
+        'a:has-text("Daily")',
+        'button:has-text("Today")',
+        'button:has-text("Daily")',
+        # General daily question patterns
         'a.group.relative.flex.h-8.items-center.justify-center.rounded.p-1[href*="envType=daily-question"]',  # Very specific
-        # Fallback - look for the flame/fire icon pattern
-        'svg path[d*="M7.19 1.564a.75.75 0"] parent::svg parent::a',
+        # Fallback - look for the flame/fire icon pattern (escape quotes properly)
+        'svg path[d*="M7.19 1.564a.75.75 0"]',
         # Another approach - find by the tooltip or aria-label if present
         'a[title*="daily" i]',
-        'a[aria-label*="daily" i]'
+        'a[aria-label*="daily" i]',
+        # Very broad fallback - any problem link that might be daily
+        'a[href*="/problems/"]'
     ]
     
     button_found = False
@@ -104,6 +116,32 @@ def click_daily_question(page, switch_to_new_tab=True):
                     print(f"📋 Found potential daily question link: {href}")
         except:
             pass
+        
+        # Fallback: Navigate directly to today's daily question
+        print("🔄 Fallback: Navigating directly to daily question...")
+        try:
+            # Get today's date for the daily question URL
+            from datetime import datetime
+            today = datetime.now()
+            
+            # Try direct navigation to daily question page
+            daily_url = "https://leetcode.com/problemset/all/?envType=daily-question"
+            print(f"🌐 Navigating to: {daily_url}")
+            
+            new_page = page.context.new_page()
+            new_page.goto(daily_url)
+            new_page.wait_for_load_state('domcontentloaded', timeout=15000)
+            
+            # Check if we successfully loaded a daily question
+            if 'envType=daily-question' in new_page.url or 'problems' in new_page.url:
+                print("✅ Successfully navigated to daily question page!")
+                return True, new_page
+            else:
+                print("❌ Fallback navigation failed")
+                new_page.close()
+                
+        except Exception as e:
+            print(f"❌ Fallback navigation error: {str(e)}")
         
         return False, None
     

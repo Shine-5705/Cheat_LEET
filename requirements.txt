@@ -1,8 +1,13 @@
-selenium==4.15.2
-openai>=1.35.0
-python-dotenv==1.0.0
-webdriver-manager==4.0.1
-requests==2.31.0
-beautifulsoup4==4.12.2
-lxml==4.9.3
-playwright==1.40.0
+# Core automation dependencies
+playwright>=1.40.0
+openai>=2.1.0
+python-dotenv>=1.0.0
+
+# Additional utilities
+requests>=2.31.0
+beautifulsoup4>=4.12.2
+lxml>=4.9.3
+
+# Legacy dependencies (for compatibility)
+selenium>=4.15.2
+webdriver-manager>=4.0.1

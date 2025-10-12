@@ -2,7 +2,7 @@ from playwright.sync_api import sync_playwright
 import os
 import time
 from dotenv import load_dotenv
-from leetcode_login import login_to_leetcode
+from storage_state_login import StorageStateLeetCodeLogin
 from daily_question_clicker import click_daily_question
 from language_selector_simple import select_programming_language
 import re
@@ -969,16 +969,88 @@ def solve_with_retry_logic(current_page, question_data, preferred_language, solu
             # Submit the solution
             if auto_submit:
                 print("\n🚀 FINAL STEP: Submitting the solution...")
-                submit_success = click_submit_button(current_page)
+                submit_success, result_status, testcases_info = click_submit_button(current_page)
                 
                 if submit_success:
-                    print("\n🎯 COMPLETE AUTOMATION SUCCESS!")
-                    print("="*60)
-                    print("✅ Solution written to LeetCode editor!")
-                    print("✅ Code tested and accepted!")
-                    print("✅ Solution submitted automatically!")
-                    print(f"🏆 Problem solved in {current_attempt} attempt(s)!")
-                    print("="*60)
+                    if result_status == "accepted":
+                        print("\n🎯 COMPLETE AUTOMATION SUCCESS!")
+                        print("="*60)
+                        print("✅ Solution written to LeetCode editor!")
+                        print("✅ Code tested and accepted!")
+                        print("✅ Solution submitted and ACCEPTED!")
+                        print(f"🏆 Problem solved in {current_attempt} attempt(s)!")
+                        print("="*60)
+                        return True  # Complete success
+                    
+                    elif result_status == "wrong_answer":
+                        print("\n❌ WRONG ANSWER DETECTED!")
+                        print("="*60)
+                        print("💡 Going to Solutions tab for third solution...")
+                        
+                        # Get third solution from Solutions tab
+                        third_solution_content, solution_language = get_third_solution_for_wrong_answer(
+                            current_page, question_data, preferred_language
+                        )
+                        
+                        if third_solution_content:
+                            print("✅ Got third solution! Generating code with OpenAI...")
+                            
+                            # Create prompt for OpenAI using the third solution
+                            third_solution_prompt = f"""
+Based on this LeetCode problem and the third solution approach, generate {preferred_language} code:
+
+PROBLEM:
+{question_data.get('description', 'Problem description not available')}
+
+THIRD SOLUTION APPROACH:
+{third_solution_content}
+
+REQUIREMENTS:
+- Write code in {preferred_language}
+- Use the same logic/approach as the third solution
+- Make sure the solution handles all edge cases
+- Provide clean, working code that will pass all test cases
+
+Generate only the code without explanations:"""
+
+                            # Call OpenAI with the third solution
+                            enhanced_question_data = {
+                                'title': question_data.get('title', 'LeetCode Problem'),
+                                'description': question_data.get('description', ''),
+                                'code_template': question_data.get('code_template', ''),
+                                'additional_context': f"Use this solution approach:\n{third_solution_content}"
+                            }
+                            openai_solution = get_solution_from_openai(enhanced_question_data, preferred_language)
+                            
+                            if openai_solution:
+                                print("✅ Generated new solution from third approach!")
+                                
+                                # Go back to the problem page and try the new solution
+                                try:
+                                    current_page.goto(question_data.get('url', 'https://leetcode.com/problemset/all/'))
+                                    time.sleep(3)
+                                    
+                                    # Select language and fill code
+                                    if select_programming_language(current_page, preferred_language):
+                                        if write_code_to_editor(current_page, openai_solution):
+                                            print("✅ New solution filled! Running recursive solve...")
+                                            # Recursively try with the new solution
+                                            return solve_with_retry_logic(
+                                                current_page, question_data, preferred_language, 
+                                                openai_solution, auto_submit
+                                            )
+                                except Exception as e:
+                                    print(f"❌ Error implementing third solution: {e}")
+                            
+                        print("❌ Could not get or implement third solution")
+                        return False
+                    
+                    else:
+                        print(f"\n⚠️ Submission completed but result unclear: {result_status}")
+                        if testcases_info:
+                            print(f"📊 Info: {testcases_info}")
+                        print("🔧 Please check the result manually")
+                        return False
                 else:
                     print("\n🎯 AUTOMATION ALMOST COMPLETE!")
                     print("="*60)
@@ -986,9 +1058,10 @@ def solve_with_retry_logic(current_page, question_data, preferred_language, solu
                     print("✅ Code accepted by LeetCode!")
                     print("⚠️ Please click 'Submit' manually!")
                     print("="*60)
+                    return False
             else:
                 print("✅ Solution accepted! Auto-submit disabled - manual submission required.")
-            return True  # Success
+                return True  # Success without auto-submit
         
         elif result_status == 'error':
             print(f"❌ Attempt {current_attempt} failed with error:")
@@ -1383,7 +1456,8 @@ IMPORTANT: Return only the corrected code, no explanations.
 
 def click_submit_button(page):
     """
-    Click the Submit button after code is accepted.
+    Click the Submit button after code is accepted and check the result.
+    Returns: (submit_success, result_status, testcases_info)
     """
     try:
         print("🚀 Clicking Submit button...")
@@ -1432,6 +1506,263 @@ def click_submit_button(page):
                     print(f"  Button {i+1}: '{text}' (classes: {classes[:50]})")
                 except:
                     pass
+            return False, "submit_failed", None
+        
+        # Wait for submission result
+        print("⏳ Waiting for submission result...")
+        time.sleep(5)  # Give it time to process
+        
+        # Check for submission result
+        result_status, testcases_info = check_submission_result(page)
+        
+        return True, result_status, testcases_info
+        
+    except Exception as e:
+        print(f"❌ Error clicking submit button: {str(e)}")
+        return False, "error", None
+
+def check_submission_result(page):
+    """
+    Check the submission result after clicking submit.
+    Returns: (result_status, testcases_info)
+    """
+    try:
+        print("🔍 Checking submission result...")
+        
+        # Wait for result to appear (max 30 seconds)
+        for attempt in range(30):
+            time.sleep(1)
+            
+            # Check for Wrong Answer
+            wrong_answer_selectors = [
+                'h3:has-text("Wrong Answer")',
+                '.text-red-60:has-text("Wrong Answer")',
+                'h3.text-red-60:has-text("Wrong Answer")',
+                '[class*="text-red"]:has-text("Wrong Answer")'
+            ]
+            
+            for selector in wrong_answer_selectors:
+                try:
+                    wrong_element = page.query_selector(selector)
+                    if wrong_element:
+                        print("❌ WRONG ANSWER detected!")
+                        
+                        # Extract testcase information
+                        testcases_info = None
+                        try:
+                            # Look for testcase info like "451 / 528 testcases passed"
+                            testcase_selectors = [
+                                '.text-text-tertiary:has-text("testcases passed")',
+                                '.text-xs:has-text("testcases passed")',
+                                '[class*="text-tertiary"]:has-text("testcases")'
+                            ]
+                            
+                            for tc_selector in testcase_selectors:
+                                tc_element = page.query_selector(tc_selector)
+                                if tc_element:
+                                    testcases_info = tc_element.inner_text().strip()
+                                    print(f"📊 Testcases: {testcases_info}")
+                                    break
+                        except:
+                            pass
+                        
+                        return "wrong_answer", testcases_info
+                except:
+                    continue
+            
+            # Check for Accepted
+            accepted_selectors = [
+                'h3:has-text("Accepted")',
+                '.text-green-60:has-text("Accepted")',
+                'h3.text-green-60:has-text("Accepted")',
+                '[class*="text-green"]:has-text("Accepted")'
+            ]
+            
+            for selector in accepted_selectors:
+                try:
+                    accepted_element = page.query_selector(selector)
+                    if accepted_element:
+                        print("✅ ACCEPTED! Solution is correct!")
+                        return "accepted", None
+                except:
+                    continue
+            
+            # Check for other error types
+            error_selectors = [
+                'h3:has-text("Runtime Error")',
+                'h3:has-text("Time Limit Exceeded")',
+                'h3:has-text("Memory Limit Exceeded")',
+                'h3:has-text("Compilation Error")',
+                '.text-red-60'
+            ]
+            
+            for selector in error_selectors:
+                try:
+                    error_element = page.query_selector(selector)
+                    if error_element:
+                        error_text = error_element.inner_text().strip()
+                        print(f"❌ Error detected: {error_text}")
+                        return "error", error_text
+                except:
+                    continue
+        
+        print("⚠️ Could not determine submission result after 30 seconds")
+        return "timeout", None
+        
+    except Exception as e:
+        print(f"❌ Error checking submission result: {str(e)}")
+        return "check_error", str(e)
+
+def get_third_solution_for_wrong_answer(page, question_data, preferred_language):
+    """
+    Navigate to Solutions tab and get the third solution when we get Wrong Answer.
+    Returns the solution content and language.
+    """
+    try:
+        print("🔍 WRONG ANSWER DETECTED - Going to Solutions tab for third solution...")
+        
+        # Navigate to Solutions tab
+        solutions_tab_selectors = [
+            'a[href*="/solutions/"]:has-text("Solutions")',
+            'a:has-text("Solutions")',
+            'button:has-text("Solutions")',
+            '[data-cy="solutions-tab"]',
+            '.tab-button:has-text("Solutions")'
+        ]
+        
+        solutions_clicked = False
+        for selector in solutions_tab_selectors:
+            try:
+                page.wait_for_selector(selector, timeout=5000)
+                solutions_tab = page.query_selector(selector)
+                if solutions_tab and solutions_tab.is_visible():
+                    solutions_tab.click()
+                    print("✅ Clicked Solutions tab")
+                    solutions_clicked = True
+                    break
+            except:
+                continue
+        
+        if not solutions_clicked:
+            print("❌ Could not find Solutions tab")
+            return None, None
+        
+        # Wait for solutions to load
+        time.sleep(3)
+        
+        # Get all solution divs
+        solution_divs = []
+        solution_selectors = [
+            '.solution-item',
+            '.solution-card',
+            '[class*="solution"]',
+            '.flex.flex-col.gap-4 > div',  # Common container pattern
+            'div[class*="border"]'  # Solutions often have border classes
+        ]
+        
+        for selector in solution_selectors:
+            try:
+                divs = page.query_selector_all(selector)
+                if divs and len(divs) >= 3:
+                    solution_divs = divs
+                    print(f"✅ Found {len(divs)} solution divs with selector: {selector}")
+                    break
+            except:
+                continue
+        
+        if not solution_divs or len(solution_divs) < 3:
+            print("❌ Could not find at least 3 solutions")
+            return None, None
+        
+        # Click on the third solution (index 2)
+        try:
+            third_solution = solution_divs[2]
+            third_solution.scroll_into_view_if_needed()
+            time.sleep(1)
+            third_solution.click()
+            print("✅ Clicked on third solution")
+            time.sleep(2)
+        except Exception as e:
+            print(f"❌ Error clicking third solution: {e}")
+            return None, None
+        
+        # Extract content from the third solution
+        solution_content = None
+        solution_language = None
+        
+        # Try to extract code blocks
+        code_selectors = [
+            'pre code',
+            '.highlight code',
+            'code',
+            '.language-java',
+            '.language-python',
+            '.language-cpp',
+            '[class*="language-"]'
+        ]
+        
+        for selector in code_selectors:
+            try:
+                code_elements = page.query_selector_all(selector)
+                for code_elem in code_elements:
+                    code_text = code_elem.inner_text().strip()
+                    if code_text and len(code_text) > 50:  # Substantial code
+                        solution_content = code_text
+                        
+                        # Try to detect language from class or content
+                        classes = code_elem.get_attribute('class') or ''
+                        if preferred_language.lower() in classes.lower():
+                            solution_language = preferred_language
+                            break
+                        elif 'java' in classes.lower() and preferred_language.lower() == 'java':
+                            solution_language = 'Java'
+                            break
+                        elif 'python' in classes.lower() and preferred_language.lower() == 'python':
+                            solution_language = 'Python'
+                            break
+                        elif 'cpp' in classes.lower() and preferred_language.lower() == 'c++':
+                            solution_language = 'C++'
+                            break
+                
+                if solution_content:
+                    break
+            except:
+                continue
+        
+        # If no code found, try to get text content from break-words class
+        if not solution_content:
+            try:
+                content_selectors = [
+                    '.break-words',
+                    '[class*="break-words"]',
+                    '.solution-content',
+                    '.content'
+                ]
+                
+                for selector in content_selectors:
+                    content_elements = page.query_selector_all(selector)
+                    for elem in content_elements:
+                        text = elem.inner_text().strip()
+                        if text and len(text) > 100:
+                            solution_content = text
+                            break
+                    if solution_content:
+                        break
+            except:
+                pass
+        
+        if solution_content:
+            print(f"✅ Extracted third solution content ({len(solution_content)} characters)")
+            if solution_language:
+                print(f"🔧 Detected language: {solution_language}")
+            return solution_content, solution_language or preferred_language
+        else:
+            print("❌ Could not extract solution content")
+            return None, None
+            
+    except Exception as e:
+        print(f"❌ Error getting third solution: {str(e)}")
+        return None, None
         
         if button_clicked:
             print("✅ Submit button clicked! Waiting for submission to complete...")
@@ -1448,8 +1779,8 @@ def click_submit_button(page):
 
 def main():
     """
-    Complete end-to-end LeetCode automation:
-    1. Login
+    Complete end-to-end LeetCode automation using storage state login:
+    1. Check/use saved login state (bypass Cloudflare)
     2. Daily question
     3. Change language
     4. Extract question + code
@@ -1458,35 +1789,44 @@ def main():
     """
     
     # Get environment variables
-    username = os.getenv('LEETCODE_USERNAME')
-    password = os.getenv('LEETCODE_PASSWORD')
-    preferred_language = os.getenv('PREFERRED_LANGUAGE', 'C++')
-    
-    if not username or not password:
-        print("❌ Missing credentials in .env file")
-        return
+    preferred_language = os.getenv('PREFERRED_LANGUAGE', 'Java')
     
     print("🚀 STARTING COMPLETE LEETCODE AUTOMATION")
     print("="*60)
-    print(f"👤 Username: {username}")
-    print(f"🔧 Language: {preferred_language}")
+    print(f"� Language: {preferred_language}")
+    print("� Using Storage State Login (bypasses Cloudflare)")
     print("="*60)
     
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)
-        context = browser.new_context()
+    # Initialize storage state login handler
+    login_handler = StorageStateLeetCodeLogin()
+    
+    try:
+        # STEP 1: GET LOGGED-IN CONTEXT
+        print("\n🔐 STEP 1: Getting logged-in browser context...")
         
         try:
-            # STEP 1: LOGIN
-            print("\n🔐 STEP 1: Logging into LeetCode...")
+            browser, context = login_handler.get_logged_in_context()
+            if not browser or not context:
+                raise Exception("Failed to get browser context")
             page = context.new_page()
-            login_success = login_to_leetcode(page, username, password)
+            print("✅ Successfully loaded saved login session!")
             
-            if not login_success:
-                print("❌ Login failed!")
-                return
-            print("✅ Login successful!")
-            
+            # Navigate to LeetCode homepage
+            print("🌐 Navigating to LeetCode...")
+            try:
+                page.goto("https://leetcode.com/", timeout=60000)  # 60 second timeout
+                page.wait_for_load_state("networkidle", timeout=30000)  # 30 second timeout
+                print("✅ LeetCode homepage loaded!")
+            except Exception as nav_error:
+                print(f"⚠️ Navigation timeout, but continuing: {str(nav_error)}")
+                # Continue anyway, the login state might still work
+        except Exception as login_error:
+            print(f"❌ Failed to load saved session: {str(login_error)}")
+            print("\n🔧 Please run the storage state login setup first:")
+            print("python storage_state_login.py")
+            return
+        
+        try:
             # STEP 2: DAILY QUESTION
             print("\n📅 STEP 2: Clicking daily question...")
             success, new_page = click_daily_question(page, context)
@@ -1497,6 +1837,10 @@ def main():
             print("✅ Daily question opened!")
             
             current_page = new_page
+            
+            # STEP 3: CHANGE LANGUAGE
+            print(f"\n🔧 STEP 3: Changing language to {preferred_language}...")
+            language_success = select_programming_language(current_page, preferred_language)
             
             # STEP 3: CHANGE LANGUAGE
             print(f"\n🔧 STEP 3: Changing language to {preferred_language}...")
@@ -1667,16 +2011,22 @@ def main():
             print(f"❌ Error in automation: {str(e)}")
         
         finally:
-            # Only close browser if it wasn't already closed by submit button
+            # Close browser properly
             try:
-                if not browser.is_connected():
-                    print("✅ Browser already closed")
-                else:
+                if browser and browser.is_connected():
                     browser.close()
                     print("🔚 Browser closed!")
+                else:
+                    print("✅ Browser already closed")
             except:
                 pass
+                
             print("🔚 Automation completed!")
+    
+    except Exception as main_error:
+        print(f"❌ Main automation error: {str(main_error)}")
+        print("\n🔧 If this is a login issue, try running:")
+        print("python storage_state_login.py")
 
 if __name__ == "__main__":
     main()
