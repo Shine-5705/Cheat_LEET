@@ -1,0 +1,17 @@
+{
+  "name": "leetcode-login-automation",
+  "version": "1.0.0",
+  "description": "Automated LeetCode login with Cloudflare bypass",
+  "main": "leetcode-login.js",
+  "scripts": {
+    "save-login": "python save-login.py",
+    "auto-login": "python auto-leetcode.py",
+    "install-playwright": "pip install playwright && python -m playwright install chromium"
+  },
+  "keywords": ["leetcode", "automation", "puppeteer", "login"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  }
+}
